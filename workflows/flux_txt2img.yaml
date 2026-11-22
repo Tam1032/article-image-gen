@@ -1,0 +1,12 @@
+name: flux_txt2img
+description: Text-to-image with FLUX.1-dev (fp8 all-in-one checkpoint), 20 steps.
+workflow: flux_txt2img.json
+
+# friendly name -> ComfyUI node id + input name
+params:
+  prompt:   {node: "6",  input: text}
+  seed:     {node: "31", input: seed}
+  width:    {node: "27", input: width}
+  height:   {node: "27", input: height}
+  steps:    {node: "31", input: steps,    default: 20}
+  guidance: {node: "35", input: guidance, default: 3.5}

@@ -1,0 +1,19 @@
+# Model weights needed by the ComfyUI workflows.
+# Downloaded into ./models/<type>/ (mounted into the ComfyUI container)
+# by: python scripts/download_models.py
+models:
+  - name: FLUX.1-dev fp8 (UNet + CLIP-L + T5-XXL + VAE in one file)
+    repo: Comfy-Org/flux1-dev
+    file: flux1-dev-fp8.safetensors
+    type: checkpoints
+    size_gb: 17.2
+    license: FLUX.1 [dev] Non-Commercial License
+
+  # Faster (4 steps) and Apache-2.0 licensed, slightly lower quality.
+  - name: FLUX.1-schnell fp8
+    repo: Comfy-Org/flux1-schnell
+    file: flux1-schnell-fp8.safetensors
+    type: checkpoints
+    size_gb: 17.2
+    license: Apache-2.0
+    optional: true
