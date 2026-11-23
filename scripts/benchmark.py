@@ -4,6 +4,7 @@ Uses only the standard library, so it runs with the server's system python3:
 
     python3 scripts/benchmark.py                      # default article set
     python3 scripts/benchmark.py --images 2 --runs 2  # more load
+    python3 scripts/benchmark.py --reference photo.jpg --strength 0.5   # FLUX Redux path
 
 Prints a Markdown table (paste it into the README) and saves raw results as JSON.
 """
@@ -11,6 +12,7 @@ Prints a Markdown table (paste it into the README) and saves raw results as JSON
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import shutil
 import statistics
@@ -96,6 +98,7 @@ def run_job(api: str, payload: dict, poll_s: float = 0.25, timeout_s: float = 18
         "total_s": round(total, 1),
         "planning_s": round(planning, 1),
         "per_image_s": round((total - planning) / n, 1),
+        "scores": [img.get("scores") for img in job.get("images", [])],
     }
 
 
@@ -113,8 +116,16 @@ def main() -> None:
     parser.add_argument("--images", type=int, default=1, help="images per job (1-4)")
     parser.add_argument("--runs", type=int, default=1, help="passes over the article set")
     parser.add_argument("--no-warmup", action="store_true", help="skip the untimed warm-up job")
+    parser.add_argument("--reference", help="image file: benchmark the reference (Redux) path")
+    parser.add_argument("--strength", type=float, default=0.5, help="reference strength")
     parser.add_argument("--out", default="data/benchmark.json")
     args = parser.parse_args()
+
+    extra = {}
+    if args.reference:
+        mime = "image/png" if args.reference.lower().endswith(".png") else "image/jpeg"
+        data = base64.b64encode(Path(args.reference).read_bytes()).decode()
+        extra = {"references": [f"data:{mime};base64,{data}"], "reference_strength": args.strength}
 
     health = request("GET", f"{args.api}/health")
     if health.get("status") != "ok":
@@ -122,14 +133,14 @@ def main() -> None:
 
     if not args.no_warmup:
         print("Warm-up job (loads models, not counted)...", flush=True)
-        warm = run_job(args.api, {**ARTICLES[0], "num_images": 1})
+        warm = run_job(args.api, {**ARTICLES[0], "num_images": 1, **extra})
         print(f"  cold start: {warm['total_s']} s", flush=True)
 
     results = []
     with GpuMonitor() as gpu:
         for r in range(args.runs):
             for article in ARTICLES:
-                res = run_job(args.api, {**article, "num_images": args.images})
+                res = run_job(args.api, {**article, "num_images": args.images, **extra})
                 results.append(res)
                 print(f"  [{res['status']}] {res['total_s']:>6.1f} s  "
                       f"plan {res['planning_s']:>5.1f} s  "
@@ -160,6 +171,19 @@ def main() -> None:
         print(f"| Cold start, first job (s) | {summary['cold_start_s']:.1f} |")
     if summary["peak_vram_mib"]:
         print(f"| Peak GPU memory (GiB) | {summary['peak_vram_mib'] / 1024:.1f} |")
+    scores = [sc for r in ok for sc in r["scores"] if sc]
+    clip = [sc["clip_score"] for sc in scores if sc.get("clip_score") is not None]
+    if clip:
+        print(f"| CLIP score, image vs prompt | {fmt(clip)} |")
+    orig = [sc["originality"] for sc in scores if sc.get("originality")]
+    if orig:
+        first_try = sum(o["attempts"] == 1 and o["passed"] for o in orig)
+        passed = sum(o["passed"] for o in orig)
+        print(f"| Reference strength | {args.strength} |")
+        print(f"| Original on first try | {first_try}/{len(orig)} |")
+        print(f"| Original after retries | {passed}/{len(orig)} |")
+        print(f"| Max CLIP similarity to reference | {fmt([o['max_clip_similarity'] for o in orig])} |")
+        print(f"| Min pHash distance to reference | {fmt([float(o['min_phash_distance']) for o in orig])} |")
     print(f"\nRaw results: {out}")
 
 
