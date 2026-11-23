@@ -41,7 +41,8 @@ docker compose build
 
 echo "==> Downloading FLUX weights into $MODELS_DIR_ABS (~17 GB, resumable)"
 docker compose run --rm --no-deps -v "$MODELS_DIR_ABS:/app/models" \
-  -e HF_TOKEN="${HF_TOKEN:-}" -e HF_HUB_DISABLE_XET=1 \n  api python scripts/download_models.py --models-dir /app/models
+  -e HF_TOKEN="${HF_TOKEN:-}" -e HF_HUB_DISABLE_XET=1 \
+  api python scripts/download_models.py --models-dir /app/models
 
 echo "==> Pulling LLM ${LLM_MODEL}"
 docker compose up -d ollama
