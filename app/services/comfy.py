@@ -11,9 +11,21 @@ from typing import Any
 import httpx
 import websockets
 
+from app.services.workflows import ModelRef
+
 logger = logging.getLogger(__name__)
 
 ProgressCallback = Callable[[int, int], Awaitable[None]]
+
+
+def _combo_options(spec: Any) -> list[str] | None:
+    """Options of a COMBO input in /object_info (old and new formats)."""
+    if isinstance(spec, list) and spec:
+        if isinstance(spec[0], list):  # [["a.safetensors", ...], {...}]
+            return spec[0]
+        if spec[0] == "COMBO" and len(spec) > 1 and isinstance(spec[1], dict):
+            return spec[1].get("options")
+    return None
 
 
 class ComfyError(RuntimeError):
@@ -40,6 +52,39 @@ class ComfyClient:
         """Unload models from VRAM (e.g. so the LLM can use the GPU)."""
         async with self._http() as http:
             await http.post("/free", json={"unload_models": True, "free_memory": True})
+
+    async def upload_image(self, data: bytes, filename: str) -> str:
+        """Upload an input image (e.g. a reference); returns the name for LoadImage."""
+        async with self._http() as http:
+            resp = await http.post(
+                "/upload/image",
+                files={"image": (filename, data, "image/png")},
+                data={"overwrite": "true"},
+            )
+        if resp.status_code != 200:
+            raise ComfyError(f"Image upload failed: {resp.text[:500]}")
+        info = resp.json()
+        return f"{info['subfolder']}/{info['name']}" if info.get("subfolder") else info["name"]
+
+    async def missing_models(self, refs: list[ModelRef]) -> list[str]:
+        """Return the model files from ``refs`` that ComfyUI does not have.
+
+        Uses /object_info to read each loader's list of available files. If that
+        list cannot be read, the file is assumed present (ComfyUI will still
+        reject the workflow with its own error).
+        """
+        missing = []
+        async with self._http() as http:
+            for ref in refs:
+                try:
+                    resp = await http.get(f"/object_info/{ref.node_class}")
+                    spec = resp.json()[ref.node_class]["input"]["required"][ref.input]
+                except (httpx.HTTPError, KeyError, ValueError):
+                    continue
+                options = _combo_options(spec)
+                if options is not None and ref.filename not in options:
+                    missing.append(ref.filename)
+        return missing
 
     async def run(
         self, graph: dict[str, Any], on_progress: ProgressCallback | None = None

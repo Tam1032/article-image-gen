@@ -1,0 +1,16 @@
+name: flux_redux
+description: >
+  FLUX.1-dev guided by a reference image (FLUX.1 Redux) plus the text prompt.
+  strength_type attn_bias: strength 1.0 follows the reference closely,
+  lower values keep its look but let the prompt change the content.
+workflow: flux_redux.json
+
+params:
+  prompt:             {node: "6",  input: text}
+  seed:               {node: "31", input: seed}
+  width:              {node: "27", input: width}
+  height:             {node: "27", input: height}
+  reference_image:    {node: "40", input: image}
+  reference_strength: {node: "44", input: strength, default: 0.5}
+  steps:              {node: "31", input: steps,    default: 20}
+  guidance:           {node: "35", input: guidance, default: 3.5}

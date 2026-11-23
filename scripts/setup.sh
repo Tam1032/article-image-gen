@@ -44,4 +44,4 @@ docker compose exec -T ollama ollama pull "${LLM_MODEL}"
 
 echo "==> Starting all services"
 docker compose up -d
-echo "Done. API: http://localhost:${API_PORT:-8000}/docs"
+echo "Done. API: http://localhost:${API_PORT:-8000}/docs  UI: http://localhost:${UI_PORT:-7860}"

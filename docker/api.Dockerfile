@@ -10,7 +10,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev
+# scoring: CPU torch + CLIP for quality checks; ui: Gradio demo
+RUN uv sync --frozen --no-dev --group scoring --group ui
 
 COPY app ./app
 COPY workflows ./workflows

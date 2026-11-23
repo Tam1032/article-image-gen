@@ -9,6 +9,24 @@ models:
     size_gb: 17.2
     license: FLUX.1 [dev] Non-Commercial License
 
+  # --- Reference images (FLUX Redux) ---
+  - name: SigCLIP vision encoder (for FLUX Redux)
+    repo: Comfy-Org/sigclip_vision_384
+    file: sigclip_vision_patch14_384.safetensors
+    type: clip_vision
+    size_gb: 0.86
+    license: Apache-2.0
+
+  # Gated: accept the license at https://huggingface.co/black-forest-labs/FLUX.1-Redux-dev
+  # and set HF_TOKEN in .env. Skipped (with a warning) when HF_TOKEN is not set.
+  - name: FLUX.1 Redux dev
+    repo: black-forest-labs/FLUX.1-Redux-dev
+    file: flux1-redux-dev.safetensors
+    type: style_models
+    size_gb: 0.13
+    license: FLUX.1 [dev] Non-Commercial License
+    gated: true
+
   # Faster (4 steps) and Apache-2.0 licensed, slightly lower quality.
   - name: FLUX.1-schnell fp8
     repo: Comfy-Org/flux1-schnell

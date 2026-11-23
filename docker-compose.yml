@@ -17,6 +17,8 @@ x-app: &app
     COMFYUI_URL: http://comfyui:8188
     OLLAMA_URL: http://ollama:11434
     REDIS_URL: redis://redis:6379/0
+    HF_HOME: /app/data/hf-cache  # CLIP model for scoring, kept on the data disk
+    GRADIO_ANALYTICS_ENABLED: "False"
   volumes:
     - ${DATA_DIR:-./data}:/app/data
   restart: unless-stopped
@@ -34,6 +36,17 @@ services:
   worker:
     <<: *app
     command: ["arq", "app.worker.WorkerSettings"]
+
+  ui:
+    <<: *app
+    command: ["python", "-m", "app.ui"]
+    environment:
+      API_URL: http://api:8000
+      GRADIO_ANALYTICS_ENABLED: "False"
+    ports:
+      - "${UI_PORT:-7860}:7860"
+    depends_on:
+      - api
 
   comfyui:
     <<: *gpu

@@ -26,6 +26,25 @@ class WorkflowError(ValueError):
     pass
 
 
+# Loader nodes and the input that names a model file, used to check that
+# ComfyUI has every weight file a workflow needs before queueing it.
+MODEL_LOADERS = {
+    "CheckpointLoaderSimple": "ckpt_name",
+    "UNETLoader": "unet_name",
+    "VAELoader": "vae_name",
+    "CLIPVisionLoader": "clip_name",
+    "StyleModelLoader": "style_model_name",
+    "LoraLoader": "lora_name",
+}
+
+
+@dataclass(frozen=True)
+class ModelRef:
+    node_class: str
+    input: str
+    filename: str
+
+
 @dataclass(frozen=True)
 class ParamBinding:
     node: str
@@ -83,6 +102,16 @@ class Workflow:
             binding = self.params[name]
             graph[binding.node]["inputs"][binding.input] = value
         return graph
+
+    def required_models(self) -> list[ModelRef]:
+        """Model files referenced by loader nodes in this workflow."""
+        refs = []
+        for node in self.graph.values():
+            input_name = MODEL_LOADERS.get(node.get("class_type", ""))
+            value = node.get("inputs", {}).get(input_name) if input_name else None
+            if isinstance(value, str):
+                refs.append(ModelRef(node["class_type"], input_name, value))
+        return refs
 
 
 class WorkflowRegistry:

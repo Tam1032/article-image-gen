@@ -7,6 +7,7 @@ Downloads resume if interrupted. Set HF_TOKEN for gated repositories.
 """
 
 import argparse
+import os
 from pathlib import Path
 
 import yaml
@@ -26,6 +27,12 @@ def main() -> None:
     for model in models:
         if model.get("optional") and not args.include_optional:
             print(f"- skip (optional): {model['name']}")
+            continue
+
+        if model.get("gated") and not os.environ.get("HF_TOKEN"):
+            print(f"- skip (gated, HF_TOKEN not set): {model['name']}")
+            print(f"    accept the license at https://huggingface.co/{model['repo']},")
+            print("    put HF_TOKEN=... in .env and run this again")
             continue
 
         dest_dir = args.models_dir / model["type"]

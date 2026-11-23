@@ -1,15 +1,17 @@
 """Background worker (arq). Run with: ``arq app.worker.WorkerSettings``."""
 
+import asyncio
 import logging
 
 from arq.connections import RedisSettings
 
 from app.config import get_settings
 from app.jobs import JobStore
-from app.pipeline import run_job
+from app.pipeline import OriginalityPolicy, run_job
 from app.schemas import JobStatus
 from app.services.comfy import ComfyClient
 from app.services.llm import OllamaClient
+from app.services.scoring import load_scorer
 from app.services.workflows import WorkflowRegistry
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -31,7 +33,20 @@ async def startup(ctx: dict) -> None:
     )
     ctx["engine"] = ComfyClient(settings.comfyui_url, timeout_s=settings.generation_timeout_s)
     ctx["workflows"] = WorkflowRegistry(settings.workflows_dir)
-    logger.info("Worker ready. Workflows: %s", ctx["workflows"].names())
+    ctx["scorer"] = (
+        await asyncio.to_thread(load_scorer, settings.clip_model) if settings.enable_scoring else None
+    )
+    ctx["policy"] = OriginalityPolicy(
+        max_clip_similarity=settings.originality_max_clip_similarity,
+        min_phash_distance=settings.originality_min_phash_distance,
+        max_retries=settings.originality_max_retries,
+        retry_strength_factor=settings.retry_strength_factor,
+    )
+    logger.info(
+        "Worker ready. Workflows: %s, scoring: %s",
+        ctx["workflows"].names(),
+        "on" if ctx["scorer"] else "off",
+    )
 
 
 async def generate_images(ctx: dict, job_id: str) -> None:
@@ -46,16 +61,25 @@ async def generate_images(ctx: dict, job_id: str) -> None:
         await store.update(job_id, status=status, progress=round(progress, 3), message=message)
 
     try:
+        ref_dir = settings.reference_dir / job_id
+        references = [(ref_dir / name).read_bytes() for name in job.reference_files]
+        workflows = ctx["workflows"]
         images = await run_job(
             job,
             planner=ctx["planner"],
             engine=ctx["engine"],
-            workflow=ctx["workflows"].get(settings.default_workflow),
+            workflow=workflows.get(settings.default_workflow),
             output_dir=settings.output_dir,
             public_base_url=settings.public_base_url,
             report=report,
             webp_quality=settings.webp_quality,
             free_vram_between_stages=settings.free_vram_between_stages,
+            references=references,
+            reference_workflow=(
+                workflows.get(settings.reference_workflow) if references else None
+            ),
+            scorer=ctx["scorer"],
+            policy=ctx["policy"],
         )
     except Exception as exc:
         logger.exception("Job %s failed", job_id)
@@ -72,4 +96,8 @@ class WorkerSettings:
     on_startup = startup
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 1  # one GPU -> one generation at a time
-    job_timeout = int(get_settings().generation_timeout_s * 4 + get_settings().llm_timeout_s)
+    # 4 images x (1 + retries) generations + LLM
+    job_timeout = int(
+        get_settings().generation_timeout_s * 4 * (1 + get_settings().originality_max_retries)
+        + get_settings().llm_timeout_s
+    )

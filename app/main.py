@@ -1,3 +1,4 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 from arq import create_pool
@@ -10,9 +11,11 @@ from app.jobs import JobStore
 from app.schemas import Job, JobCreated, JobRequest
 from app.services.comfy import ComfyClient
 from app.services.llm import OllamaClient
+from app.services.references import InvalidReference, describe, load_reference
 
 settings = get_settings()
 settings.output_dir.mkdir(parents=True, exist_ok=True)
+settings.reference_dir.mkdir(parents=True, exist_ok=True)
 
 
 @asynccontextmanager
@@ -26,7 +29,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Article Image Generator",
     description="Generate original, web-ready illustrations for articles.",
-    version="0.1.0",
+    version="0.2.0",
     lifespan=lifespan,
 )
 app.mount("/files", StaticFiles(directory=settings.output_dir), name="files")
@@ -34,7 +37,32 @@ app.mount("/files", StaticFiles(directory=settings.output_dir), name="files")
 
 @app.post("/v1/jobs", response_model=JobCreated, status_code=status.HTTP_202_ACCEPTED)
 async def create_job(body: JobRequest, request: Request) -> JobCreated:
-    job = await request.app.state.store.create(body)
+    # Resolve reference images now so bad input fails here, not in the worker.
+    try:
+        references = await asyncio.gather(
+            *(
+                load_reference(
+                    ref, settings.max_reference_bytes, settings.allow_private_reference_urls
+                )
+                for ref in body.references
+            )
+        )
+    except InvalidReference as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_ENTITY, f"Bad reference: {exc}") from None
+
+    store: JobStore = request.app.state.store
+    stored = body.model_copy(update={"references": [describe(r) for r in body.references]})
+    job = await store.create(stored)
+    if references:
+        ref_dir = settings.reference_dir / job.id
+        ref_dir.mkdir(parents=True, exist_ok=True)
+        names = []
+        for k, data in enumerate(references):
+            name = f"ref-{k + 1}.png"
+            (ref_dir / name).write_bytes(data)
+            names.append(name)
+        job = await store.update(job.id, reference_files=names)
+
     await request.app.state.redis.enqueue_job("generate_images", job.id, _job_id=job.id)
     return JobCreated(
         job_id=job.id,

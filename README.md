@@ -5,7 +5,10 @@ optionally its content) and get back unique images, sized and compressed for the
 alt text.
 
 Built on **FLUX.1-dev** running in **ComfyUI**, with a **local LLM (Qwen via Ollama)** that
-turns the article into image prompts. Everything runs on a single GPU (tested target: RTX 4090, 24 GB).
+turns the article into image prompts. Optionally give **reference images**: the service generates
+new images in a similar style with **FLUX.1 Redux**, then checks with **CLIP + perceptual hashing**
+that the results are not copies, regenerating them if needed. Everything runs on a single GPU
+(tested target: RTX 4090, 24 GB).
 
 ## The problem
 
@@ -18,6 +21,7 @@ expensive. This service produces a fresh, on-topic image in seconds.
 | Article title (required) | 1–4 WebP images (`featured` 1200×630, `inline` 1200×800, `square` 1080×1080) |
 | Article content / summary (optional) | Alt text for each image, in the article's language |
 | Number of images, size preset, seed (optional) | The prompt and seed used, for reproducibility |
+| Reference images + strength (optional) | Scores: CLIP prompt alignment; similarity to the references (originality check) |
 
 ## How it works
 
@@ -25,8 +29,12 @@ expensive. This service produces a fresh, on-topic image in seconds.
 POST /v1/jobs ──► FastAPI ──► Redis queue ──► worker
                                                 │
                      1. plan     Ollama (Qwen):     article ─► N image prompts + alt text
-                     2. render   ComfyUI (FLUX.1-dev fp8): prompt ─► image   (progress via WebSocket)
-                     3. publish  crop/resize ─► WebP ─► /files/<job>/<slug>-N.webp
+                     2. render   ComfyUI (FLUX.1-dev fp8): prompt [+ reference via Redux] ─► image
+                                 (progress via WebSocket)
+                     3. publish  crop/resize ─► WebP
+                     4. check    CLIP + pHash vs references: too similar? ─► new seed, weaker
+                                 reference, regenerate (max 2 retries); CLIP score vs prompt
+                     5. save     /files/<job>/<slug>-N.webp
                                                 │
 GET /v1/jobs/{id} ◄── status, progress, image URLs + alt text
 ```
@@ -44,6 +52,15 @@ Design notes:
   The worker runs one job at a time.
 - **Structured LLM output.** The LLM answers against a JSON schema (Ollama structured outputs),
   with validation and a retry.
+- **Originality check.** A Redux result can end up too close to its reference, which defeats the
+  purpose (and the copyright concern). Each result is compared with every reference using CLIP
+  image embeddings (semantic closeness) and perceptual hashes (pixel-level copies). If CLIP
+  similarity > 0.92 or pHash distance < 12, the image is regenerated with a new seed and a 40 %
+  weaker reference, up to 2 times; the scores are returned so a human can review borderline
+  cases. Thresholds live in `.env`.
+- **Fail fast.** Reference images are downloaded/validated when the job is created (422 on bad
+  input, private/loopback URLs rejected as a basic SSRF guard), and the worker checks through
+  `/object_info` that ComfyUI has every model file a workflow needs before using the GPU.
 - **Reproducible environment.** ComfyUI is pinned to a release tag; model weights are declared in
   `models.yaml` and downloaded by a script; everything starts with `docker compose`.
 
@@ -60,7 +77,8 @@ cd article-image-gen
 ./scripts/setup.sh        # checks disk space, builds images, downloads FLUX (~17 GB) + Qwen (~7 GB), starts services
 ```
 
-Then open `http://<server>:8000/docs`, or:
+Then open the **demo UI** at `http://<server>:7860` or the API docs at `http://<server>:8000/docs`
+(on a remote server: `ssh -L 7860:localhost:7860 -L 8000:localhost:8000 <server>`), or:
 
 ```bash
 curl -X POST http://localhost:8000/v1/jobs \
@@ -69,12 +87,37 @@ curl -X POST http://localhost:8000/v1/jobs \
 # -> {"job_id": "…", "status": "queued", "status_url": "…/v1/jobs/…"}
 
 curl http://localhost:8000/v1/jobs/<job_id>
+
+# With a reference image (URL or data:image/...;base64 URI), 0.05-1.0 strength
+curl -X POST http://localhost:8000/v1/jobs \
+  -H 'Content-Type: application/json' \
+  -d '{"title": "Du lịch Đà Lạt mùa hoa dã quỳ", "num_images": 2,
+       "references": ["https://example.com/photo.jpg"], "reference_strength": 0.5}'
 ```
+
+Each image in the result carries its scores:
+
+```json
+"scores": {
+  "clip_score": 31.2,
+  "originality": {"max_clip_similarity": 0.81, "min_phash_distance": 30, "passed": true, "attempts": 1}
+}
+```
+
+### Reference images: FLUX.1 Redux (gated model)
+
+1. Accept the license at <https://huggingface.co/black-forest-labs/FLUX.1-Redux-dev>.
+2. Create a read token at <https://huggingface.co/settings/tokens> and set `HF_TOKEN=` in `.env`.
+3. Download the extra weights (~1 GB): `./scripts/setup.sh`, or only the download step:
+   `docker compose run --rm --no-deps -v "$MODELS_DIR:/app/models" -e HF_TOKEN api python scripts/download_models.py --models-dir /app/models`
+
+Without the token everything else works; jobs with references fail with a clear message.
 
 Settings live in `.env` (see `.env.example`). Older driver? Build ComfyUI with
 `--build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126`.
 To watch or edit workflows in the ComfyUI editor, open an SSH tunnel:
-`ssh -L 8188:localhost:8188 <server>` and browse `http://localhost:8188`.
+`ssh -L 8188:localhost:8188 <server>` and browse `http://localhost:8188`. Drag a file from
+`workflows/*.json` onto the canvas to open it; the queue panel shows jobs sent by the worker.
 
 ### Troubleshooting: disk space
 
@@ -94,13 +137,15 @@ To watch or edit workflows in the ComfyUI editor, open an SSH tunnel:
 | `POST` | `/v1/jobs` | Create a generation job → `202` with `job_id` |
 | `GET` | `/v1/jobs/{job_id}` | Status (`queued`, `planning`, `generating`, `completed`, `failed`), progress 0–1, images |
 | `GET` | `/files/{job_id}/{file}` | Generated image |
+| — | `:7860` | Gradio demo UI (client of the API) |
 | `GET` | `/health` | Redis / ComfyUI / Ollama reachability |
 
 ## Development
 
 ```bash
 uv sync
-uv run pytest            # tests use fake LLM/ComfyUI clients, no GPU needed
+uv run pytest            # tests use fake LLM/ComfyUI/scorer, no GPU or model downloads
+uv sync --group scoring --group ui   # optional: CLIP scoring (CPU torch) and the Gradio UI
 ```
 
 Project layout:
@@ -111,10 +156,13 @@ app/
   worker.py            arq worker (one job at a time)
   pipeline.py          plan -> render -> publish
   jobs.py              job state in Redis
+  ui.py                Gradio demo (talks to the API)
   services/
     llm.py             Ollama client + prompt writing
     comfy.py           ComfyUI HTTP/WebSocket client
-    workflows.py       workflow templates
+    workflows.py       workflow templates + required-model listing
+    references.py      reference image fetch/validation (SSRF guard)
+    scoring.py         CLIP score, CLIP/pHash originality check
     postprocess.py     crop/resize/WebP
 workflows/             ComfyUI API-format graphs + YAML manifests
 docker/                Dockerfiles (API/worker, ComfyUI)
@@ -124,13 +172,13 @@ scripts/               setup, model download, benchmark
 ## Roadmap
 
 - [x] Article → prompts → FLUX images → web-ready files, async job API, Docker
-- [ ] Reference images → new original image (FLUX Redux)
-- [ ] Originality check: CLIP / perceptual-hash similarity against reference images, auto-retry
-- [ ] Relevance score (CLIP image–text) per image
-- [ ] Gradio demo UI
+- [x] Reference images → new original image (FLUX Redux)
+- [x] Originality check: CLIP / perceptual-hash similarity against reference images, auto-retry
+- [x] Relevance score (CLIP image–text) per image
+- [x] Gradio demo UI
 - [ ] Benchmarks on RTX 4090 (latency, VRAM, scores)
 
 ## License notes
 
-FLUX.1-dev weights are under the FLUX.1 [dev] Non-Commercial License. For commercial use,
+FLUX.1-dev and FLUX.1 Redux-dev weights are under the FLUX.1 [dev] Non-Commercial License. For commercial use,
 switch to FLUX.1-schnell (Apache-2.0, listed as optional in `models.yaml`).

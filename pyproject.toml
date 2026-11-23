@@ -1,6 +1,6 @@
 [project]
 name = "article-image-gen"
-version = "0.1.0"
+version = "0.2.0"
 description = "Generate original, web-ready illustrations for articles with FLUX (ComfyUI) and a local LLM (Ollama)."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,9 +23,27 @@ dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
 ]
+# CLIP score + originality checks in the worker (CPU-only torch keeps the image small)
+scoring = [
+    "torch>=2.5",
+    "transformers>=4.45",
+    "imagehash>=4.3",
+]
+# Gradio demo UI
+ui = [
+    "gradio>=5",
+]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform != 'darwin'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

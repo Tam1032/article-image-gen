@@ -28,6 +28,21 @@ class Settings(BaseSettings):
     # When true, each stage releases the GPU before the next one starts.
     free_vram_between_stages: bool = True
 
+    # Reference images (FLUX Redux)
+    reference_workflow: str = "flux_redux"
+    reference_dir: Path = Path("data/references")
+    max_reference_bytes: int = 10_000_000
+    allow_private_reference_urls: bool = False  # SSRF guard; true only for local testing
+
+    # Scoring (CPU, in the worker)
+    enable_scoring: bool = True
+    clip_model: str = "openai/clip-vit-base-patch32"
+    # A result counts as a copy if CLIP similarity is above, or pHash distance below:
+    originality_max_clip_similarity: float = 0.92
+    originality_min_phash_distance: int = 12
+    originality_max_retries: int = 2
+    retry_strength_factor: float = 0.6  # weaken the reference on each retry
+
     # Output
     output_dir: Path = Path("data/outputs")
     public_base_url: str = "http://localhost:8000"
