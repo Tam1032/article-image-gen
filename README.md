@@ -118,7 +118,7 @@ app/
     postprocess.py     crop/resize/WebP
 workflows/             ComfyUI API-format graphs + YAML manifests
 docker/                Dockerfiles (API/worker, ComfyUI)
-scripts/               setup and model download
+scripts/               setup, model download, benchmark
 ```
 
 ## Roadmap
