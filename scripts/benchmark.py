@@ -102,12 +102,13 @@ def run_job(api: str, payload: dict, poll_s: float = 0.25, timeout_s: float = 18
     }
 
 
-def fmt(values: list[float]) -> str:
+def fmt(values: list[float], digits: int = 1) -> str:
     if not values:
         return "-"
     if len(values) == 1:
-        return f"{values[0]:.1f}"
-    return f"{statistics.median(values):.1f} ({min(values):.1f}–{max(values):.1f})"
+        return f"{values[0]:.{digits}f}"
+    med, lo, hi = statistics.median(values), min(values), max(values)
+    return f"{med:.{digits}f} ({lo:.{digits}f}–{hi:.{digits}f})"
 
 
 def main() -> None:
@@ -182,7 +183,7 @@ def main() -> None:
         print(f"| Reference strength | {args.strength} |")
         print(f"| Original on first try | {first_try}/{len(orig)} |")
         print(f"| Original after retries | {passed}/{len(orig)} |")
-        print(f"| Max CLIP similarity to reference | {fmt([o['max_clip_similarity'] for o in orig])} |")
+        print(f"| Max CLIP similarity to reference | {fmt([o['max_clip_similarity'] for o in orig], 3)} |")
         print(f"| Min pHash distance to reference | {fmt([float(o['min_phash_distance']) for o in orig])} |")
     print(f"\nRaw results: {out}")
 
