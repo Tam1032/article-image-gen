@@ -123,6 +123,9 @@ To watch or edit workflows in the ComfyUI editor, open an SSH tunnel:
 
 `no space left on device` during the build means the disk holding Docker's data is full.
 
+- Free space Docker can rebuild: `docker builder prune -af` (build cache) and
+  `docker image prune -f` (old image versions left after a rebuild).
+
 - Model weights and outputs can live on any disk: set `MODELS_DIR` and `DATA_DIR` in `.env`
   (e.g. `MODELS_DIR=/mnt/bigdisk/article-image-gen/models`).
 - Docker images and the Ollama model live in Docker's data root. To move it to another disk,

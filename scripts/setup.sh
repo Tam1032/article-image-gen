@@ -22,11 +22,17 @@ check_space() {  # path, needed GB, label
   fi
   echo "   $3: $1 has ${avail} GB free (needs ~$2 GB) - ok"
 }
-echo "==> Checking disk space"
-DOCKER_ROOT="$(docker info -f '{{.DockerRootDir}}')"
-check_space "$DOCKER_ROOT" 30 "Docker images + LLM"
-if [ ! -f "$MODELS_DIR_ABS/checkpoints/flux1-dev-fp8.safetensors" ]; then
-  check_space "$MODELS_DIR_ABS" 18 "FLUX weights"
+echo "==> Checking disk space (SKIP_DISK_CHECK=1 to skip)"
+if [ "${SKIP_DISK_CHECK:-0}" != "1" ]; then
+  DOCKER_ROOT="$(docker info -f '{{.DockerRootDir}}')"
+  if docker image inspect article-image-gen-comfyui >/dev/null 2>&1; then
+    check_space "$DOCKER_ROOT" 8 "Docker image update"   # rebuild: only changed layers
+  else
+    check_space "$DOCKER_ROOT" 30 "Docker images + LLM"   # first build
+  fi
+  if [ ! -f "$MODELS_DIR_ABS/checkpoints/flux1-dev-fp8.safetensors" ]; then
+    check_space "$MODELS_DIR_ABS" 18 "FLUX weights"
+  fi
 fi
 
 # --- Build, download, start -------------------------------------------------
