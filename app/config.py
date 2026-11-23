@@ -37,8 +37,9 @@ class Settings(BaseSettings):
     # Scoring (CPU, in the worker)
     enable_scoring: bool = True
     clip_model: str = "openai/clip-vit-base-patch32"
-    # A result counts as a copy if CLIP similarity is above, or pHash distance below:
-    originality_max_clip_similarity: float = 0.92
+    copy_detection_model: str = "facebook/dinov2-small"
+    # A result counts as a copy if DINOv2 similarity is above, or pHash distance below:
+    originality_max_copy_similarity: float = 0.60
     originality_min_phash_distance: int = 12
     originality_max_retries: int = 2
     retry_strength_factor: float = 0.6  # weaken the reference on each retry

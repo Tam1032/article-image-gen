@@ -54,7 +54,7 @@ def test_redux_workflow_and_required_models(workflows_dir):
     graph = wf.build({"prompt": "x", "seed": 1, "width": 512, "height": 512,
                       "reference_image": "ref.png"})
     assert graph["40"]["inputs"]["image"] == "ref.png"
-    assert graph["44"]["inputs"]["strength"] == 0.5
+    assert graph["44"]["inputs"]["strength"] == 0.3
     assert {m.filename for m in wf.required_models()} == {
         "flux1-dev-fp8.safetensors",
         "sigclip_vision_patch14_384.safetensors",

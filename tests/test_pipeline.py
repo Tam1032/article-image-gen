@@ -89,9 +89,12 @@ class FakeScorer:
         self.copies = copies
         self.checks = 0
 
-    def image_similarity(self, a, b):
+    def copy_similarity(self, a, b):
         self.checks += 1
-        return 0.99 if self.checks <= self.copies else 0.6
+        return 0.9 if self.checks <= self.copies else 0.3
+
+    def image_similarity(self, a, b):
+        return 0.8
 
     def phash_distance(self, a, b):
         return 2 if self.checks <= self.copies else 30

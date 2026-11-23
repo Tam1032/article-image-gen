@@ -53,12 +53,14 @@ class ImageScorer(Protocol):
 
     def image_similarity(self, a: bytes, b: bytes) -> float: ...
 
+    def copy_similarity(self, a: bytes, b: bytes) -> float: ...
+
     def phash_distance(self, a: bytes, b: bytes) -> int: ...
 
 
 @dataclass(frozen=True)
 class OriginalityPolicy:
-    max_clip_similarity: float = 0.92
+    max_copy_similarity: float = 0.60  # DINOv2 cosine, calibrated (see README)
     min_phash_distance: int = 12
     max_retries: int = 2
     retry_strength_factor: float = 0.6
@@ -67,12 +69,16 @@ class OriginalityPolicy:
 def check_originality(
     scorer: ImageScorer, image: bytes, references: list[bytes], policy: OriginalityPolicy, attempts: int
 ) -> Originality:
-    sims = [scorer.image_similarity(image, ref) for ref in references]
-    dists = [scorer.phash_distance(image, ref) for ref in references]
-    max_sim, min_dist = max(sims), min(dists)
-    passed = max_sim <= policy.max_clip_similarity and min_dist >= policy.min_phash_distance
+    copy_sim = max(scorer.copy_similarity(image, ref) for ref in references)
+    clip_sim = max(scorer.image_similarity(image, ref) for ref in references)
+    min_dist = min(scorer.phash_distance(image, ref) for ref in references)
+    passed = copy_sim <= policy.max_copy_similarity and min_dist >= policy.min_phash_distance
     return Originality(
-        max_clip_similarity=max_sim, min_phash_distance=min_dist, passed=passed, attempts=attempts
+        max_copy_similarity=copy_sim,
+        max_clip_similarity=clip_sim,
+        min_phash_distance=min_dist,
+        passed=passed,
+        attempts=attempts,
     )
 
 
@@ -172,8 +178,8 @@ async def run_job(
                 )
                 if not originality.passed and attempts <= policy.max_retries:
                     logger.info(
-                        "Job %s image %d too similar (clip %.3f, phash %d), retrying",
-                        job.id, i + 1, originality.max_clip_similarity,
+                        "Job %s image %d too similar (copy %.3f, phash %d), retrying",
+                        job.id, i + 1, originality.max_copy_similarity,
                         originality.min_phash_distance,
                     )
                     strength = round(strength * policy.retry_strength_factor, 3)

@@ -4,7 +4,7 @@ Uses only the standard library, so it runs with the server's system python3:
 
     python3 scripts/benchmark.py                      # default article set
     python3 scripts/benchmark.py --images 2 --runs 2  # more load
-    python3 scripts/benchmark.py --reference photo.jpg --strength 0.5   # FLUX Redux path
+    python3 scripts/benchmark.py --reference photo.jpg --strength 0.3   # FLUX Redux path
 
 Prints a Markdown table (paste it into the README) and saves raw results as JSON.
 """
@@ -118,7 +118,7 @@ def main() -> None:
     parser.add_argument("--runs", type=int, default=1, help="passes over the article set")
     parser.add_argument("--no-warmup", action="store_true", help="skip the untimed warm-up job")
     parser.add_argument("--reference", help="image file: benchmark the reference (Redux) path")
-    parser.add_argument("--strength", type=float, default=0.5, help="reference strength")
+    parser.add_argument("--strength", type=float, default=0.3, help="reference strength")
     parser.add_argument("--out", default="data/benchmark.json")
     args = parser.parse_args()
 
@@ -183,7 +183,8 @@ def main() -> None:
         print(f"| Reference strength | {args.strength} |")
         print(f"| Original on first try | {first_try}/{len(orig)} |")
         print(f"| Original after retries | {passed}/{len(orig)} |")
-        print(f"| Max CLIP similarity to reference | {fmt([o['max_clip_similarity'] for o in orig], 3)} |")
+        print(f"| Copy similarity to reference (DINOv2) | {fmt([o['max_copy_similarity'] for o in orig], 3)} |")
+        print(f"| CLIP similarity to reference | {fmt([o['max_clip_similarity'] for o in orig], 3)} |")
         print(f"| Min pHash distance to reference | {fmt([float(o['min_phash_distance']) for o in orig])} |")
     print(f"\nRaw results: {out}")
 

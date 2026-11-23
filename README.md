@@ -6,9 +6,19 @@ alt text.
 
 Built on **FLUX.1-dev** running in **ComfyUI**, with a **local LLM (Qwen via Ollama)** that
 turns the article into image prompts. Optionally give **reference images**: the service generates
-new images in a similar style with **FLUX.1 Redux**, then checks with **CLIP + perceptual hashing**
-that the results are not copies, regenerating them if needed. Everything runs on a single GPU
-(tested target: RTX 4090, 24 GB).
+new images in a similar style with **FLUX.1 Redux**, then checks with **DINOv2 + perceptual
+hashing** that the results are not copies, regenerating them if needed. Everything runs on a
+single GPU (tested on an RTX 4090, 24 GB).
+
+| Title only (FLUX.1-dev) | | |
+|---|---|---|
+| ![](docs/images/txt2img-metro.webp) | ![](docs/images/txt2img-coffee.webp) | ![](docs/images/txt2img-cafe-ai.webp) |
+| *Metro số 1 TP.HCM chính thức vận hành thương mại* | *Giá cà phê xuất khẩu tăng mạnh, nông dân Tây Nguyên phấn khởi* | *How small cafés use AI to plan their weekly menu* |
+
+| Reference image | + title, strength 0.3 (default) | |
+|---|---|---|
+| ![](docs/images/reference-starry-night.webp) | ![](docs/images/redux-03-coffee.webp) | ![](docs/images/redux-03-metro.webp) |
+| *The Starry Night* (public domain) | *Giá cà phê xuất khẩu tăng mạnh…* | *Metro số 1 TP.HCM…* |
 
 ## The problem
 
@@ -21,7 +31,7 @@ expensive. This service produces a fresh, on-topic image in seconds.
 | Article title (required) | 1–4 WebP images (`featured` 1200×630, `inline` 1200×800, `square` 1080×1080) |
 | Article content / summary (optional) | Alt text for each image, in the article's language |
 | Number of images, size preset, seed (optional) | The prompt and seed used, for reproducibility |
-| Reference images + strength (optional) | Scores: CLIP prompt alignment; similarity to the references (originality check) |
+| Reference images + strength (optional) | Scores: CLIP prompt alignment; copy similarity to the references (originality check) |
 
 ## How it works
 
@@ -32,7 +42,7 @@ POST /v1/jobs ──► FastAPI ──► Redis queue ──► worker
                      2. render   ComfyUI (FLUX.1-dev fp8): prompt [+ reference via Redux] ─► image
                                  (progress via WebSocket)
                      3. publish  crop/resize ─► WebP
-                     4. check    CLIP + pHash vs references: too similar? ─► new seed, weaker
+                     4. check    DINOv2 + pHash vs references: a copy? ─► new seed, weaker
                                  reference, regenerate (max 2 retries); CLIP score vs prompt
                      5. save     /files/<job>/<slug>-N.webp
                                                 │
@@ -52,12 +62,13 @@ Design notes:
   The worker runs one job at a time.
 - **Structured LLM output.** The LLM answers against a JSON schema (Ollama structured outputs),
   with validation and a retry.
-- **Originality check.** A Redux result can end up too close to its reference, which defeats the
-  purpose (and the copyright concern). Each result is compared with every reference using CLIP
-  image embeddings (semantic closeness) and perceptual hashes (pixel-level copies). If CLIP
-  similarity > 0.92 or pHash distance < 12, the image is regenerated with a new seed and a 40 %
-  weaker reference, up to 2 times; the scores are returned so a human can review borderline
-  cases. Thresholds live in `.env`.
+- **Originality check, calibrated on real outputs.** A Redux result can end up reproducing its
+  reference, which defeats the purpose (and the copyright concern). Each result is compared with
+  every reference using **DINOv2** image embeddings (layout/structure) and perceptual hashes
+  (pixel-level copies). If DINOv2 similarity > 0.60 or pHash distance < 12, the image is
+  regenerated with a new seed and a 40 % weaker reference, up to 2 times; scores are returned so
+  a human can review borderline cases. The first version used CLIP image similarity and missed
+  copied compositions; see [Choosing the copy detector](#choosing-the-copy-detector).
 - **Fail fast.** Reference images are downloaded/validated when the job is created (422 on bad
   input, private/loopback URLs rejected as a basic SSRF guard), and the worker checks through
   `/object_info` that ComfyUI has every model file a workflow needs before using the GPU.
@@ -92,7 +103,7 @@ curl http://localhost:8000/v1/jobs/<job_id>
 curl -X POST http://localhost:8000/v1/jobs \
   -H 'Content-Type: application/json' \
   -d '{"title": "Du lịch Đà Lạt mùa hoa dã quỳ", "num_images": 2,
-       "references": ["https://example.com/photo.jpg"], "reference_strength": 0.5}'
+       "references": ["https://example.com/photo.jpg"], "reference_strength": 0.3}'
 ```
 
 Each image in the result carries its scores:
@@ -100,7 +111,8 @@ Each image in the result carries its scores:
 ```json
 "scores": {
   "clip_score": 31.2,
-  "originality": {"max_clip_similarity": 0.81, "min_phash_distance": 30, "passed": true, "attempts": 1}
+  "originality": {"max_copy_similarity": 0.48, "max_clip_similarity": 0.77,
+                  "min_phash_distance": 32, "passed": true, "attempts": 1}
 }
 ```
 
@@ -132,6 +144,55 @@ To watch or edit workflows in the ComfyUI editor, open an SSH tunnel:
   stop Docker, copy `/var/lib/docker` (and `/var/lib/containerd` if used) there, set
   `"data-root": "/mnt/bigdisk/docker"` in `/etc/docker/daemon.json` (keep existing keys such as
   the `nvidia` runtime), and start Docker again.
+
+## Benchmarks (RTX 4090 24 GB, FLUX.1-dev fp8, 20 steps, Qwen 3.5 9B)
+
+Measured with `scripts/benchmark.py`: 5 articles (Vietnamese and English, all three sizes), after a
+warm-up job. Median (min–max).
+
+**Latency and GPU memory, title only, 2 images per job**
+
+| | GPU time-sharing (default) | Both models kept in VRAM |
+|---|---|---|
+| End-to-end per job | 51.1 s (50.4–54.7) | **40.4 s** (39.4–46.2) |
+| LLM planning | **4.8 s** | 16.0 s |
+| FLUX + post-processing per image | 23.3 s | **12.7 s** |
+| Peak GPU memory | 19.3 GiB | 23.0 GiB |
+| CLIP score (image vs prompt) | 30.1 | 30.2 |
+
+Time-sharing reloads FLUX (17 GB) for every job, about 20 s; keeping both models loaded
+removes that but leaves ~1 GB of VRAM free, and Ollama then appears to run part of the LLM on CPU,
+so planning is slower. The default favours robustness (it also works with a 27B LLM);
+`FREE_VRAM_BETWEEN_STAGES=false` is ~20 % faster with the 9B model.
+
+**Reference strength: following the reference vs following the article** (1 reference, 5 articles each)
+
+| `reference_strength` | CLIP score vs prompt | DINOv2 similarity to reference | What the images look like |
+|---|---|---|---|
+| no reference | 30.1 | 0.05 | — |
+| **0.3** (default) | 28.6 | 0.48 (0.30–0.62) | Reference style, new scene from the article |
+| 0.5 | 16.5 | 0.69 (0.64–0.75) | Reference composition reproduced |
+| 0.8 | 12.7 | 0.71 (0.70–0.73) | Reference composition reproduced |
+| 1.0 | 12.9 | 0.75 (0.73–0.82) | Reference composition reproduced |
+
+| Reference | 0.3 | 0.5 | 1.0 |
+|---|---|---|---|
+| ![](docs/images/reference-starry-night.webp) | ![](docs/images/redux-03-dalat.webp) | ![](docs/images/redux-05-dalat.webp) | ![](docs/images/redux-10-dalat.webp) |
+
+*Du lịch Đà Lạt mùa hoa dã quỳ* with *The Starry Night* as the reference. Above 0.3 the cypress,
+church and village of the painting come back regardless of the article.
+
+### Choosing the copy detector
+
+The first version flagged copies with CLIP image-image similarity (> 0.92). On the 25 Redux outputs
+above it flagged none, although every image at strength ≥ 0.5 visibly reproduces the reference
+layout. CLIP is trained to match captions, so "a starry-night painting with a village" scores
+similarly whether the layout is copied or not: its values overlap (0.68–0.77 for good images at 0.3,
+0.71–0.91 for copied layouts). Self-supervised **DINOv2** features keep structure and separate the two
+groups (max 0.62 vs min 0.64), so the check now uses DINOv2 with a 0.60 threshold. With it, 20/20
+images at strength ≥ 0.5 are flagged and regenerated, and 1/5 at 0.3 (the painting shown through a
+window). This is calibrated on one reference and 25 images: treat the threshold as a starting
+point and re-check it on your own references.
 
 ## API
 
@@ -165,7 +226,7 @@ app/
     comfy.py           ComfyUI HTTP/WebSocket client
     workflows.py       workflow templates + required-model listing
     references.py      reference image fetch/validation (SSRF guard)
-    scoring.py         CLIP score, CLIP/pHash originality check
+    scoring.py         CLIP score; DINOv2/pHash copy detection
     postprocess.py     crop/resize/WebP
 workflows/             ComfyUI API-format graphs + YAML manifests
 docker/                Dockerfiles (API/worker, ComfyUI)
@@ -179,7 +240,9 @@ scripts/               setup, model download, benchmark
 - [x] Originality check: CLIP / perceptual-hash similarity against reference images, auto-retry
 - [x] Relevance score (CLIP image–text) per image
 - [x] Gradio demo UI
-- [ ] Benchmarks on RTX 4090 (latency, VRAM, scores)
+- [x] Benchmarks on RTX 4090 (latency, VRAM, scores)
+- [ ] Prompts that keep text out of images (FLUX sometimes renders signs with garbled text)
+- [ ] Larger calibration set for the copy threshold (several references and styles)
 
 ## License notes
 

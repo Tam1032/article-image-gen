@@ -34,7 +34,7 @@ def _caption(i: int, image: dict) -> str:
     if orig:
         verdict = "original" if orig["passed"] else "TOO SIMILAR"
         parts.append(
-            f"vs reference: CLIP sim {orig['max_clip_similarity']:.2f}, "
+            f"vs reference: copy sim {orig['max_copy_similarity']:.2f}, "
             f"pHash dist {orig['min_phash_distance']} → {verdict} "
             f"({orig['attempts']} attempt{'s' if orig['attempts'] > 1 else ''})"
         )
@@ -98,7 +98,7 @@ with gr.Blocks(title="Article Image Generator") as demo:
             with gr.Accordion("Reference images (optional)", open=False):
                 files = gr.File(file_count="multiple", file_types=["image"], label="Up to 4 images")
                 strength = gr.Slider(
-                    0.05, 1.0, value=0.5, step=0.05, label="Reference strength (1.0 = very close)"
+                    0.05, 1.0, value=0.3, step=0.05, label="Reference strength (1.0 = very close)"
                 )
             run = gr.Button("Generate", variant="primary")
         with gr.Column(scale=2):

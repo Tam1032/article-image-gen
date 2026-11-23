@@ -11,6 +11,6 @@ params:
   width:              {node: "27", input: width}
   height:             {node: "27", input: height}
   reference_image:    {node: "40", input: image}
-  reference_strength: {node: "44", input: strength, default: 0.5}
+  reference_strength: {node: "44", input: strength, default: 0.3}
   steps:              {node: "31", input: steps,    default: 20}
   guidance:           {node: "35", input: guidance, default: 3.5}

@@ -34,10 +34,10 @@ async def startup(ctx: dict) -> None:
     ctx["engine"] = ComfyClient(settings.comfyui_url, timeout_s=settings.generation_timeout_s)
     ctx["workflows"] = WorkflowRegistry(settings.workflows_dir)
     ctx["scorer"] = (
-        await asyncio.to_thread(load_scorer, settings.clip_model) if settings.enable_scoring else None
+        await asyncio.to_thread(load_scorer, settings.clip_model, settings.copy_detection_model) if settings.enable_scoring else None
     )
     ctx["policy"] = OriginalityPolicy(
-        max_clip_similarity=settings.originality_max_clip_similarity,
+        max_copy_similarity=settings.originality_max_copy_similarity,
         min_phash_distance=settings.originality_min_phash_distance,
         max_retries=settings.originality_max_retries,
         retry_strength_factor=settings.retry_strength_factor,

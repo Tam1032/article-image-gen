@@ -46,7 +46,7 @@
       "conditioning": ["35", 0],
       "style_model": ["43", 0],
       "clip_vision_output": ["42", 0],
-      "strength": 0.5,
+      "strength": 0.3,
       "strength_type": "attn_bias"
     }
   },

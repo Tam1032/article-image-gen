@@ -42,7 +42,7 @@ class JobRequest(BaseModel):
         ),
     )
     reference_strength: float = Field(
-        default=0.5,
+        default=0.3,
         ge=0.05,
         le=1.0,
         description="How closely to follow the reference (1.0 = very close)",
@@ -65,7 +65,8 @@ class ImagePlan(BaseModel):
 class Originality(BaseModel):
     """Similarity of the generated image to the closest reference image."""
 
-    max_clip_similarity: float  # cosine, 1.0 = same content/composition
+    max_copy_similarity: float  # DINOv2 cosine: layout/structure copy detector, decides `passed`
+    max_clip_similarity: float  # CLIP cosine: semantic/style closeness, informational
     min_phash_distance: int  # Hamming distance of perceptual hashes, 0 = near copy
     passed: bool
     attempts: int  # generations needed (retries use a new seed and weaker reference)
