@@ -36,8 +36,12 @@ if [ "${SKIP_DISK_CHECK:-0}" != "1" ]; then
 fi
 
 # --- Build, download, start -------------------------------------------------
-echo "==> Building images"
-docker compose build
+if [ "${SKIP_BUILD:-0}" = "1" ]; then
+  echo "==> Skipping image build (SKIP_BUILD=1)"
+else
+  echo "==> Building images (SKIP_BUILD=1 to reuse existing images)"
+  docker compose build
+fi
 
 echo "==> Downloading FLUX weights into $MODELS_DIR_ABS (~17 GB, resumable)"
 docker compose run --rm --no-deps -v "$MODELS_DIR_ABS:/app/models" \
