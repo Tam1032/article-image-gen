@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379/0"
 
     # LLM (prompt writer)
-    llm_model: str = "qwen3.6:27b"
+    llm_model: str = "qwen3.5:9b"
     llm_think: bool = False
     llm_temperature: float = 0.7
     llm_timeout_s: float = 300

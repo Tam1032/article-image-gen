@@ -4,7 +4,7 @@ Generate **original, web-ready illustrations for articles**: send an article tit
 optionally its content) and get back unique images, sized and compressed for the web, with
 alt text.
 
-Built on **FLUX.1-dev** running in **ComfyUI**, with a **local LLM (Qwen 3.6 via Ollama)** that
+Built on **FLUX.1-dev** running in **ComfyUI**, with a **local LLM (Qwen via Ollama)** that
 turns the article into image prompts. Everything runs on a single GPU (tested target: RTX 4090, 24 GB).
 
 ## The problem
@@ -24,7 +24,7 @@ expensive. This service produces a fresh, on-topic image in seconds.
 ```
 POST /v1/jobs ──► FastAPI ──► Redis queue ──► worker
                                                 │
-                     1. plan     Ollama (Qwen 3.6): article ─► N image prompts + alt text
+                     1. plan     Ollama (Qwen):     article ─► N image prompts + alt text
                      2. render   ComfyUI (FLUX.1-dev fp8): prompt ─► image   (progress via WebSocket)
                      3. publish  crop/resize ─► WebP ─► /files/<job>/<slug>-N.webp
                                                 │
@@ -37,10 +37,11 @@ Design notes:
   export plus a small YAML manifest mapping friendly parameters (`prompt`, `seed`, `steps`…) to
   node inputs (`workflows/flux_txt2img.yaml`). A workflow can be re-exported from the ComfyUI
   editor without touching Python code.
-- **One GPU, two big models.** Qwen 3.6 27B (~17 GB) and FLUX.1-dev fp8 (~17 GB) do not fit in
-  24 GB together, so stages time-share the GPU: ComfyUI is asked to unload (`POST /free`) before
-  the LLM runs, and Ollama unloads right after answering (`keep_alive: 0`). The worker runs one
-  job at a time.
+- **One GPU, two models.** By default the stages time-share the GPU: ComfyUI is asked to unload
+  (`POST /free`) before the LLM runs, and Ollama unloads right after answering (`keep_alive: 0`).
+  This is required for larger LLMs (Qwen 3.6 27B ~17 GB + FLUX fp8 do not fit in 24 GB together);
+  with the default Qwen 3.5 9B you can set `FREE_VRAM_BETWEEN_STAGES=false` to keep both loaded.
+  The worker runs one job at a time.
 - **Structured LLM output.** The LLM answers against a JSON schema (Ollama structured outputs),
   with validation and a retry.
 - **Reproducible environment.** ComfyUI is pinned to a release tag; model weights are declared in
@@ -50,12 +51,13 @@ Design notes:
 
 Requirements: NVIDIA GPU with ≥ 24 GB VRAM, NVIDIA driver ≥ 570 (or see below),
 Docker + [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html),
-~60 GB free disk.
+disk space: ~30 GB where Docker stores images (`docker info -f '{{.DockerRootDir}}'`) and
+~18 GB for model weights (`MODELS_DIR`).
 
 ```bash
 git clone https://github.com/Tam1032/article-image-gen.git
 cd article-image-gen
-./scripts/setup.sh        # builds images, downloads FLUX (~17 GB) and Qwen (~17 GB), starts services
+./scripts/setup.sh        # checks disk space, builds images, downloads FLUX (~17 GB) + Qwen (~7 GB), starts services
 ```
 
 Then open `http://<server>:8000/docs`, or:
@@ -73,6 +75,17 @@ Settings live in `.env` (see `.env.example`). Older driver? Build ComfyUI with
 `--build-arg TORCH_INDEX_URL=https://download.pytorch.org/whl/cu126`.
 To watch or edit workflows in the ComfyUI editor, open an SSH tunnel:
 `ssh -L 8188:localhost:8188 <server>` and browse `http://localhost:8188`.
+
+### Troubleshooting: disk space
+
+`no space left on device` during the build means the disk holding Docker's data is full.
+
+- Model weights and outputs can live on any disk: set `MODELS_DIR` and `DATA_DIR` in `.env`
+  (e.g. `MODELS_DIR=/mnt/bigdisk/article-image-gen/models`).
+- Docker images and the Ollama model live in Docker's data root. To move it to another disk,
+  stop Docker, copy `/var/lib/docker` (and `/var/lib/containerd` if used) there, set
+  `"data-root": "/mnt/bigdisk/docker"` in `/etc/docker/daemon.json` (keep existing keys such as
+  the `nvidia` runtime), and start Docker again.
 
 ## API
 

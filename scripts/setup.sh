@@ -6,11 +6,35 @@ cd "$(dirname "$0")/.."
 [ -f .env ] || { cp .env.example .env; echo "Created .env from .env.example"; }
 set -a; source .env; set +a
 
+MODELS_DIR="${MODELS_DIR:-./models}"
+DATA_DIR="${DATA_DIR:-./data}"
+mkdir -p "$MODELS_DIR" "$DATA_DIR"
+MODELS_DIR_ABS="$(cd "$MODELS_DIR" && pwd)"
+
+# --- Disk space check -------------------------------------------------------
+free_gb() { df -BG --output=avail "$1" | tail -1 | tr -dc '0-9'; }
+check_space() {  # path, needed GB, label
+  local avail; avail=$(free_gb "$1")
+  if [ "$avail" -lt "$2" ]; then
+    echo "!! Not enough space for $3: $1 has ${avail} GB free, needs ~$2 GB."
+    echo "   See README > Troubleshooting > Disk space."
+    exit 1
+  fi
+  echo "   $3: $1 has ${avail} GB free (needs ~$2 GB) - ok"
+}
+echo "==> Checking disk space"
+DOCKER_ROOT="$(docker info -f '{{.DockerRootDir}}')"
+check_space "$DOCKER_ROOT" 30 "Docker images + LLM"
+if [ ! -f "$MODELS_DIR_ABS/checkpoints/flux1-dev-fp8.safetensors" ]; then
+  check_space "$MODELS_DIR_ABS" 18 "FLUX weights"
+fi
+
+# --- Build, download, start -------------------------------------------------
 echo "==> Building images"
 docker compose build
 
-echo "==> Downloading FLUX weights into ./models (~17 GB, resumable)"
-docker compose run --rm --no-deps -v "$PWD/models:/app/models" \
+echo "==> Downloading FLUX weights into $MODELS_DIR_ABS (~17 GB, resumable)"
+docker compose run --rm --no-deps -v "$MODELS_DIR_ABS:/app/models" \
   -e HF_TOKEN="${HF_TOKEN:-}" api python scripts/download_models.py --models-dir /app/models
 
 echo "==> Pulling LLM ${LLM_MODEL}"

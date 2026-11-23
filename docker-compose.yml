@@ -18,7 +18,7 @@ x-app: &app
     OLLAMA_URL: http://ollama:11434
     REDIS_URL: redis://redis:6379/0
   volumes:
-    - ./data:/app/data
+    - ${DATA_DIR:-./data}:/app/data
   restart: unless-stopped
   depends_on:
     - redis
@@ -42,7 +42,7 @@ services:
       context: .
       dockerfile: docker/comfyui.Dockerfile
     volumes:
-      - ./models:/opt/ComfyUI/models
+      - ${MODELS_DIR:-./models}:/opt/ComfyUI/models
     ports:
       - "127.0.0.1:8188:8188"  # ComfyUI editor, reachable via SSH tunnel only
     restart: unless-stopped
